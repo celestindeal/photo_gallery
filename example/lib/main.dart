@@ -13,11 +13,21 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      title: 'Photo Manager Demo',
       home: Material(
         child: Center(
           child: Builder(
             builder: (context) {
-              return Gallery();
+              return RaisedButton(
+                onPressed: () async {
+                  final permitted = await PhotoManager.requestPermission();
+                  if (!permitted) return;
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => Gallery()),
+                  );
+                },
+                child: Text('Open Gallery'),
+              );
             },
           ),
         ),
@@ -65,15 +75,12 @@ class _GalleryState extends State<Gallery> {
       ),
       body: GridView.builder(
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          // A grid view with 3 items per row
           crossAxisCount: 3,
         ),
         itemCount: assets.length,
         itemBuilder: (_, index) {
-          print(assets[index]);
-          String id = assets[index].id;
-          AssetEntity ok = AssetEntity(id: id);
-
-          return AssetThumbnail(asset: ok);
+          return AssetThumbnail(asset: assets[index]);
         },
       ),
     );

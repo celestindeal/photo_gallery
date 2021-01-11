@@ -1,305 +1,249 @@
-import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:photo_gallery/photo_gallery.dart';
-import 'package:transparent_image/transparent_image.dart';
+import 'package:photo_manager/photo_manager.dart';
 import 'package:video_player/video_player.dart';
 
 void main() {
   runApp(MyApp());
 }
 
-class MyApp extends StatefulWidget {
-  @override
-  _MyAppState createState() => _MyAppState();
-}
-
-class _MyAppState extends State<MyApp> {
-  List<Album> _albums;
-  bool _loading = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _loading = true;
-    initAsync();
-  }
-
-  Future<void> initAsync() async {
-    if (await _promptPermissionSetting()) {
-      List<Album> albums =
-          await PhotoGallery.listAlbums(mediumType: MediumType.image);
-      setState(() {
-        _albums = albums;
-        _loading = false;
-      });
-    }
-    setState(() {
-      _loading = false;
-    });
-  }
-
-  Future<bool> _promptPermissionSetting() async {
-    if (Platform.isIOS &&
-            await Permission.storage.request().isGranted &&
-            await Permission.photos.request().isGranted ||
-        Platform.isAndroid && await Permission.storage.request().isGranted) {
-      return true;
-    }
-    return false;
-  }
-
+class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      home: Scaffold(
-        appBar: AppBar(
-          title: const Text('Photo gallery example'),
-        ),
-        body: _loading
-            ? Center(
-                child: CircularProgressIndicator(),
-              )
-            : LayoutBuilder(
-                builder: (context, constraints) {
-                  double gridWidth = (constraints.maxWidth - 20) / 3;
-                  double gridHeight = gridWidth + 33;
-                  double ratio = gridWidth / gridHeight;
-                  return Container(
-                    padding: EdgeInsets.all(5),
-                    child: GridView.count(
-                      childAspectRatio: ratio,
-                      crossAxisCount: 3,
-                      mainAxisSpacing: 5.0,
-                      crossAxisSpacing: 5.0,
-                      children: <Widget>[
-                        ...?_albums?.map(
-                          (album) => GestureDetector(
-                            onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                    builder: (context) => AlbumPage(album))),
-                            child: Column(
-                              children: <Widget>[
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(5.0),
-                                  child: Container(
-                                    color: Colors.grey[300],
-                                    height: gridWidth,
-                                    width: gridWidth,
-                                    child: FadeInImage(
-                                      fit: BoxFit.cover,
-                                      placeholder:
-                                          MemoryImage(kTransparentImage),
-                                      image: AlbumThumbnailProvider(
-                                        albumId: album.id,
-                                        mediumType: album.mediumType,
-                                        highQuality: true,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                Container(
-                                  alignment: Alignment.topLeft,
-                                  padding: EdgeInsets.only(left: 2.0),
-                                  child: Text(
-                                    album.name,
-                                    maxLines: 1,
-                                    textAlign: TextAlign.start,
-                                    style: TextStyle(
-                                      height: 1.2,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                ),
-                                Container(
-                                  alignment: Alignment.topLeft,
-                                  padding: EdgeInsets.only(left: 2.0),
-                                  child: Text(
-                                    album.count.toString(),
-                                    textAlign: TextAlign.start,
-                                    style: TextStyle(
-                                      height: 1.2,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+      title: 'Photo Manager Demo',
+      home: Material(
+        child: Center(
+          child: Builder(
+            builder: (context) {
+              return RaisedButton(
+                onPressed: () async {
+                  final permitted = await PhotoManager.requestPermission();
+                  if (!permitted) return;
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => Gallery()),
                   );
                 },
-              ),
+                child: Text('Open Gallery'),
+              );
+            },
+          ),
+        ),
       ),
     );
   }
 }
 
-class AlbumPage extends StatefulWidget {
-  final Album album;
-
-  AlbumPage(Album album) : album = album;
-
+class Gallery extends StatefulWidget {
   @override
-  State<StatefulWidget> createState() => AlbumPageState();
+  _GalleryState createState() => _GalleryState();
 }
 
-class AlbumPageState extends State<AlbumPage> {
-  List<Medium> _media;
+class _GalleryState extends State<Gallery> {
+  // This will hold all the assets we fetched
+  List<AssetEntity> assets = [];
 
   @override
   void initState() {
+    _fetchAssets();
     super.initState();
-    initAsync();
   }
 
-  void initAsync() async {
-    MediaPage mediaPage = await widget.album.listMedia();
-    setState(() {
-      _media = mediaPage.items;
-    });
+  _fetchAssets() async {
+    // Set onlyAll to true, to fetch only the 'Recent' album
+    // which contains all the photos/videos in the storage
+    final albums = await PhotoManager.getAssetPathList(onlyAll: true);
+    final recentAlbum = albums.first;
+
+    // Now that we got the album, fetch all the assets it contains
+    final recentAssets = await recentAlbum.getAssetListRange(
+      start: 0, // start at index 0
+      end: 1000000, // end at a very big index (to get all the assets)
+    );
+
+    // Update the state and notify UI
+    setState(() => assets = recentAssets);
   }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      home: Scaffold(
-        appBar: AppBar(
-          leading: IconButton(
-            icon: Icon(Icons.arrow_back_ios),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-          title: Text(widget.album.name),
-        ),
-        body: GridView.count(
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Gallery'),
+      ),
+      body: GridView.builder(
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          // A grid view with 3 items per row
           crossAxisCount: 3,
-          mainAxisSpacing: 1.0,
-          crossAxisSpacing: 1.0,
-          children: <Widget>[
-            ...?_media?.map(
-              (medium) => GestureDetector(
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (context) => ViewerPage(medium))),
-                child: Container(
-                  color: Colors.grey[300],
-                  child: FadeInImage(
-                    fit: BoxFit.cover,
-                    placeholder: MemoryImage(kTransparentImage),
-                    image: ThumbnailProvider(
-                      mediumId: medium.id,
-                      mediumType: medium.mediumType,
-                      highQuality: true,
+        ),
+        itemCount: assets.length,
+        itemBuilder: (_, index) {
+          return AssetThumbnail(asset: assets[index]);
+        },
+      ),
+    );
+  }
+}
+
+class AssetThumbnail extends StatelessWidget {
+  const AssetThumbnail({
+    Key key,
+    @required this.asset,
+  }) : super(key: key);
+
+  final AssetEntity asset;
+
+  @override
+  Widget build(BuildContext context) {
+    // We're using a FutureBuilder since thumbData is a future
+    return FutureBuilder<Uint8List>(
+      future: asset.thumbData,
+      builder: (_, snapshot) {
+        final bytes = snapshot.data;
+        // If we have no data, display a spinner
+        if (bytes == null) return CircularProgressIndicator();
+        // If there's data, display it as an image
+        return InkWell(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) {
+                  if (asset.type == AssetType.image) {
+                    // If this is an image, navigate to ImageScreen
+                    return ImageScreen(imageFile: asset.file);
+                  } else {
+                    // if it's not, navigate to VideoScreen
+                    return VideoScreen(videoFile: asset.file);
+                  }
+                },
+              ),
+            );
+          },
+          child: Stack(
+            children: [
+              // Wrap the image in a Positioned.fill to fill the space
+              Positioned.fill(
+                child: Image.memory(bytes, fit: BoxFit.cover),
+              ),
+              // Display a Play icon if the asset is a video
+              if (asset.type == AssetType.video)
+                Center(
+                  child: Container(
+                    color: Colors.blue,
+                    child: Icon(
+                      Icons.play_arrow,
+                      color: Colors.white,
                     ),
                   ),
                 ),
-              ),
-            ),
-          ],
-        ),
-      ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
 
-class ViewerPage extends StatelessWidget {
-  final Medium medium;
+class ImageScreen extends StatelessWidget {
+  const ImageScreen({
+    Key key,
+    @required this.imageFile,
+  }) : super(key: key);
 
-  ViewerPage(Medium medium) : medium = medium;
+  final Future<File> imageFile;
 
   @override
   Widget build(BuildContext context) {
-    DateTime date = medium.creationDate ?? medium.modifiedDate;
-    return MaterialApp(
-      home: Scaffold(
-        appBar: AppBar(
-          leading: IconButton(
-            onPressed: () => Navigator.of(context).pop(),
-            icon: Icon(Icons.arrow_back_ios),
-          ),
-          title: Text(date?.toLocal().toString()),
-        ),
-        body: Container(
-          alignment: Alignment.center,
-          child: medium.mediumType == MediumType.image
-              ? FadeInImage(
-                  fit: BoxFit.cover,
-                  placeholder: MemoryImage(kTransparentImage),
-                  image: PhotoProvider(mediumId: medium.id),
-                )
-              : VideoProvider(
-                  mediumId: medium.id,
-                ),
-        ),
+    return Container(
+      color: Colors.black,
+      alignment: Alignment.center,
+      child: FutureBuilder<File>(
+        future: imageFile,
+        builder: (_, snapshot) {
+          final file = snapshot.data;
+          if (file == null) return Container();
+          return Image.file(file);
+        },
       ),
     );
   }
 }
 
-class VideoProvider extends StatefulWidget {
-  final String mediumId;
+class VideoScreen extends StatefulWidget {
+  const VideoScreen({
+    Key key,
+    @required this.videoFile,
+  }) : super(key: key);
 
-  const VideoProvider({
-    @required this.mediumId,
-  });
+  final Future<File> videoFile;
 
   @override
-  _VideoProviderState createState() => _VideoProviderState();
+  _VideoScreenState createState() => _VideoScreenState();
 }
 
-class _VideoProviderState extends State<VideoProvider> {
+class _VideoScreenState extends State<VideoScreen> {
   VideoPlayerController _controller;
-  File _file;
+  bool initialized = false;
 
   @override
   void initState() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      initAsync();
-    });
+    _initVideo();
     super.initState();
   }
 
-  Future<void> initAsync() async {
-    try {
-      _file = await PhotoGallery.getFile(mediumId: widget.mediumId);
-      _controller = VideoPlayerController.file(_file);
-      _controller.initialize().then((_) {
-        // Ensure the first frame is shown after the video is initialized, even before the play button has been pressed.
-        setState(() {});
-      });
-    } catch (e) {
-      print("Failed : $e");
-    }
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  _initVideo() async {
+    final video = await widget.videoFile;
+    _controller = VideoPlayerController.file(video)
+      // Play the video again when it ends
+      ..setLooping(true)
+      // initialize the controller and notify UI when done
+      ..initialize().then((_) => setState(() => initialized = true));
   }
 
   @override
   Widget build(BuildContext context) {
-    return _controller == null || !_controller.value.initialized
-        ? Container()
-        : Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              AspectRatio(
-                aspectRatio: _controller.value.aspectRatio,
-                child: VideoPlayer(_controller),
+    return Scaffold(
+      body: initialized
+          // If the video is initialized, display it
+          ? Scaffold(
+              body: Center(
+                child: AspectRatio(
+                  aspectRatio: _controller.value.aspectRatio,
+                  // Use the VideoPlayer widget to display the video.
+                  child: VideoPlayer(_controller),
+                ),
               ),
-              FlatButton(
+              floatingActionButton: FloatingActionButton(
                 onPressed: () {
+                  // Wrap the play or pause in a call to `setState`. This ensures the
+                  // correct icon is shown.
                   setState(() {
-                    _controller.value.isPlaying
-                        ? _controller.pause()
-                        : _controller.play();
+                    // If the video is playing, pause it.
+                    if (_controller.value.isPlaying) {
+                      _controller.pause();
+                    } else {
+                      // If the video is paused, play it.
+                      _controller.play();
+                    }
                   });
                 },
+                // Display the correct icon depending on the state of the player.
                 child: Icon(
                   _controller.value.isPlaying ? Icons.pause : Icons.play_arrow,
                 ),
               ),
-            ],
-          );
+            )
+          // If the video is not yet initialized, display a spinner
+          : Center(child: CircularProgressIndicator()),
+    );
   }
 }
